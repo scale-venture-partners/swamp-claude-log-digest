@@ -1,0 +1,12 @@
+#!/bin/sh
+# Type-checks, format-checks, lints, and tests before allowing a commit.
+# Installed via scripts/install-hooks.sh — git doesn't track .git/hooks itself.
+set -e
+
+if ! command -v deno >/dev/null 2>&1; then
+  echo "pre-commit: deno not found on PATH." >&2
+  echo "Install it: https://docs.deno.com/runtime/getting_started/installation/" >&2
+  exit 1
+fi
+
+exec deno task verify

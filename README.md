@@ -136,6 +136,27 @@ by directory convention rather than an explicit list.
   with push/PR access to the target repo (only needed for `publish`).
 - An Anthropic API key.
 
+## Development
+
+Requires [Deno](https://docs.deno.com/runtime/getting_started/installation/)
+(no other toolchain — linting, type-checking, and testing all run on Deno's
+built-in tools).
+
+```bash
+deno task check      # type-check
+deno task fmt:check  # deno fmt --check
+deno task lint       # deno lint
+deno task test       # deno test (unit + integration, real git, stubbed network)
+deno task verify     # all of the above, in order
+
+./scripts/install-hooks.sh  # once per clone: installs the pre-commit hook
+```
+
+The pre-commit hook runs `deno task verify` before every commit. Tests use a
+real temporary git repository for `publish` (real `git`, a faked `gh`
+executable on a throwaway `PATH` entry) and a stubbed `fetch` for Claude API
+calls — no network access or real GitHub PRs are involved.
+
 ## License
 
 MIT — see [LICENSE.txt](LICENSE.txt).

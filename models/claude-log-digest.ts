@@ -15,9 +15,13 @@
  *
  * @module
  */
+// swamp's bundler inlines npm deps by scanning for inline "npm:" specifiers
+// at push time — this can't be moved to deno.json's import map.
+// deno-lint-ignore no-import-prefix
 import { z } from "npm:zod@4";
 
-const GlobalArgsSchema = z.object({
+/** Global arguments accepted by every method on this model. */
+export const GlobalArgsSchema = z.object({
   apiKey: z.string().describe("Anthropic API key").meta({ sensitive: true }),
   model: z.string().default("claude-sonnet-5").describe(
     "Claude model ID for analysis. Pin this explicitly — model IDs retire " +
@@ -78,7 +82,7 @@ const GlobalArgsSchema = z.object({
   ).describe("Git commit author email used for the skills commit"),
 });
 
-type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
+export type GlobalArgs = z.infer<typeof GlobalArgsSchema>;
 
 const ProjectSchema = z.object({
   name: z.string(),
@@ -143,7 +147,7 @@ const PublishResultSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /** Extract readable text from one transcript JSONL line (user or assistant). */
-function lineText(obj: unknown): { role: string; text: string } | null {
+export function lineText(obj: unknown): { role: string; text: string } | null {
   if (typeof obj !== "object" || obj === null) return null;
   const o = obj as Record<string, unknown>;
   const role = o.type;
@@ -171,7 +175,7 @@ function lineText(obj: unknown): { role: string; text: string } | null {
 }
 
 /** Turn a project dir slug into a friendlier label. */
-function labelFor(slug: string): string {
+export function labelFor(slug: string): string {
   // Claude Code slugs its project dirs from the absolute path, e.g.
   // "-Users-will-Documents-GitHub-some-repo" -> "some-repo".
   const m = slug.match(/Documents-GitHub-?(.*)$/);
@@ -180,7 +184,7 @@ function labelFor(slug: string): string {
 }
 
 /** Condense one project's recent transcripts into a single capped string. */
-async function condenseProject(
+export async function condenseProject(
   dir: string,
   cutoffMs: number,
   maxChars: number,
@@ -232,7 +236,7 @@ async function condenseProject(
 }
 
 /** Call the Anthropic Messages API and return the concatenated text blocks. */
-async function callClaude(
+export async function callClaude(
   args: GlobalArgs,
   prompt: string,
   system: string,
@@ -264,7 +268,7 @@ async function callClaude(
 }
 
 /** Read existing skill name+description pairs for dedupe context. */
-async function readExistingSkills(
+export async function readExistingSkills(
   skillsDir: string,
 ): Promise<Array<{ name: string; description: string }>> {
   if (!skillsDir) return [];
@@ -299,7 +303,7 @@ async function readExistingSkills(
 }
 
 /** Best-effort extraction of a JSON array from a model response. */
-function parseJsonArray(text: string): unknown[] {
+export function parseJsonArray(text: string): unknown[] {
   let t = text.trim();
   try {
     const direct = JSON.parse(t);
@@ -318,12 +322,14 @@ function parseJsonArray(text: string): unknown[] {
   }
 }
 
-function slugify(name: string): string {
+/** Turn a proposed skill name into a filesystem-safe, kebab-case slug. */
+export function slugify(name: string): string {
   return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
     .slice(0, 64) || "skill";
 }
 
-async function fileExists(path: string): Promise<boolean> {
+/** Whether a path exists (file or directory). */
+export async function fileExists(path: string): Promise<boolean> {
   try {
     await Deno.stat(path);
     return true;
@@ -333,7 +339,10 @@ async function fileExists(path: string): Promise<boolean> {
 }
 
 /** Recursively copy a directory (Deno has no built-in for this). */
-async function copyDirRecursive(src: string, dest: string): Promise<void> {
+export async function copyDirRecursive(
+  src: string,
+  dest: string,
+): Promise<void> {
   await Deno.mkdir(dest, { recursive: true });
   for await (const entry of Deno.readDir(src)) {
     const s = `${src}/${entry.name}`;
@@ -346,11 +355,34 @@ async function copyDirRecursive(src: string, dest: string): Promise<void> {
   }
 }
 
+// Git sets these for hook processes (pointing at the repo running the hook)
+// and Deno.Command inherits them. If `run` is itself invoked from inside
+// another git hook, they leak into these subprocesses and misdirect them —
+// e.g. a relative GIT_INDEX_FILE breaks `git worktree add` entirely, and
+// inherited GIT_AUTHOR_* silently overrides our explicit `-c user.*` commit
+// identity. Clear them so every git/gh call here resolves purely from `cwd`.
+const GIT_ENV_VARS_TO_CLEAR = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+  "GIT_COMMON_DIR",
+  "GIT_PREFIX",
+  "GIT_AUTHOR_NAME",
+  "GIT_AUTHOR_EMAIL",
+  "GIT_AUTHOR_DATE",
+  "GIT_COMMITTER_NAME",
+  "GIT_COMMITTER_EMAIL",
+  "GIT_COMMITTER_DATE",
+];
+
 /** Run a subprocess and capture its output. */
-async function run(
+export async function run(
   cmd: string[],
   cwd: string,
 ): Promise<{ code: number; stdout: string; stderr: string }> {
+  for (const key of GIT_ENV_VARS_TO_CLEAR) Deno.env.delete(key);
   const { code, stdout, stderr } = await new Deno.Command(cmd[0], {
     args: cmd.slice(1),
     cwd,
