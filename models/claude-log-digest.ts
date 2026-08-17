@@ -58,6 +58,12 @@ const GlobalArgsSchema = z.object({
   targetRepoSlug: z.string().default("").describe(
     "'owner/repo' slug passed to `gh pr create --repo` (required by `publish`)",
   ),
+  skillsRepoPath: z.string().default("skills").describe(
+    "Path, relative to the target repo root, that proposed skills are " +
+      "committed into. Use the default 'skills' for a flat skills repo, or " +
+      "something like 'plugins/<plugin-name>/skills' for a repo that " +
+      "organizes skills into Claude Code plugins.",
+  ),
   baseBranch: z.string().default("main").describe(
     "Branch the new branch and PR are based on",
   ),
@@ -751,7 +757,8 @@ export const model = {
             throw new Error(`git worktree add failed: ${res.stderr}`);
           }
 
-          const skillsDest = `${worktreeDir}/skills`;
+          const repoRelPath = g.skillsRepoPath.replace(/^\/|\/$/g, "");
+          const skillsDest = `${worktreeDir}/${repoRelPath}`;
           await Deno.mkdir(skillsDest, { recursive: true });
           for (const entry of staged) {
             if (!entry.isDirectory) continue;
@@ -761,7 +768,7 @@ export const model = {
             );
           }
 
-          await run(["git", "add", "skills/"], worktreeDir);
+          await run(["git", "add", repoRelPath], worktreeDir);
           const diff = await run(
             ["git", "diff", "--cached", "--quiet"],
             worktreeDir,

@@ -52,6 +52,7 @@ Create a model instance and set its global arguments
 | `maxProjects` / `maxCharsPerProject` / `maxSkills` | no | `25` / `48000` / `5` | corpus and output caps |
 | `targetRepoPath` | to publish | `""` | local checkout of the repo to PR into |
 | `targetRepoSlug` | to publish | `""` | `owner/repo`, passed to `gh pr create --repo` |
+| `skillsRepoPath` | no | `skills` | path, relative to the target repo root, that skills are committed into — see [Plugin-based skills repos](#plugin-based-skills-repos) |
 | `baseBranch` | no | `main` | branch the PR is based on |
 | `branchPrefix` | no | `claude-digest/skills` | new branch name prefix |
 | `committerName` / `committerEmail` | no | `claude-log-digest` / `claude-log-digest@users.noreply.github.com` | commit author |
@@ -96,6 +97,38 @@ skills produce no diff against `baseBranch`. Skip step 6 (and
 
 To automate the full pipeline, wire `gather -> analyze -> publish` into a
 swamp workflow.
+
+## Plugin-based skills repos
+
+Some skills repos aren't flat — they group skills under
+[Claude Code plugins](https://docs.claude.com/en/docs/claude-code/plugins),
+e.g.:
+
+```
+your-skills-repo/
+  plugins/
+    your-plugin/
+      .claude-plugin/plugin.json
+      skills/
+        some-skill/SKILL.md
+```
+
+Point both `skillsDir` (dedupe scanning) and `skillsRepoPath` (where
+`publish` commits new skills) at the plugin's `skills/` directory:
+
+```bash
+swamp model edit claude-log-digest
+```
+
+```yaml
+globalArguments:
+  skillsDir: /path/to/your-skills-repo/plugins/your-plugin/skills
+  skillsRepoPath: plugins/your-plugin/skills
+```
+
+A new skill is picked up by the plugin as soon as its `SKILL.md` lands under
+that directory — no `plugin.json` edit needed, since plugins discover skills
+by directory convention rather than an explicit list.
 
 ## Requirements
 
