@@ -56,16 +56,43 @@ Create a model instance and set its global arguments
 | `branchPrefix` | no | `claude-digest/skills` | new branch name prefix |
 | `committerName` / `committerEmail` | no | `claude-log-digest` / `claude-log-digest@users.noreply.github.com` | commit author |
 
-## Run it
+## Example
+
+Inside an existing swamp repo (`swamp repo init` if you don't have one yet):
 
 ```bash
-swamp model method run claude-log-digest gather    # free — inspect the manifest first
-swamp model method run claude-log-digest analyze   # ~(projects + 2 + skills) Claude calls
-swamp model method run claude-log-digest publish   # opens the PR
+# 1. Install the extension
+swamp extension pull @scale-venture-partners/claude-log-digest
+
+# 2. Store your Anthropic API key in a vault
+swamp vault create local_encryption secrets
+printf '%s' "$ANTHROPIC_API_KEY" | swamp vault put secrets ANTHROPIC_API_KEY
+
+# 3. Create a model instance with your paths
+swamp model create @scale-venture-partners/claude-log-digest claude-log-digest \
+  --global-arg apiKey='${{ vault.get(secrets, ANTHROPIC_API_KEY) }}' \
+  --global-arg skillsDir=/path/to/your-skills-repo/skills \
+  --global-arg skillsOutDir=/path/to/this-swamp-repo/.swamp/work/proposed-skills \
+  --global-arg digestOut=/path/to/this-swamp-repo/.swamp/work/digest.md \
+  --global-arg targetRepoPath=/path/to/your-skills-repo \
+  --global-arg targetRepoSlug=your-org/your-skills-repo
+
+# 4. Gather the last 7 days of transcripts (free — no LLM calls) and inspect them
+swamp model method run claude-log-digest gather
+swamp data get claude-log-digest manifest --json
+
+# 5. Summarize the work and distill proposed skills with Claude
+swamp model method run claude-log-digest analyze
+swamp data get claude-log-digest digest --json      # the update + proposed skills
+cat /path/to/this-swamp-repo/.swamp/work/digest.md  # same thing, human-readable
+
+# 6. Open a PR against your skills repo with whatever was proposed
+swamp model method run claude-log-digest publish
 ```
 
 `publish` exits cleanly with no PR if nothing was staged, or if the staged
-skills produce no diff against `baseBranch`.
+skills produce no diff against `baseBranch`. Skip step 6 (and
+`targetRepoPath`/`targetRepoSlug`) if you just want the digest, not a PR.
 
 To automate the full pipeline, wire `gather -> analyze -> publish` into a
 swamp workflow.
