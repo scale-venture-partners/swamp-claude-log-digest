@@ -1,0 +1,25 @@
+manifestVersion: 1
+name: '@wdm0006/claude-log-digest'
+version: 2026.08.17.1
+description: >-
+  Summarize recent Claude Code session transcripts and distill reusable agent
+  skills, proposed as a pull request against a skills repository.
+repository: 'https://github.com/wdm0006/swamp-claude-log-digest'
+models:
+  - claude-log-digest.ts
+workflows: []
+vaults: []
+drivers: []
+datastores: []
+reports: []
+skills: []
+additionalFiles:
+  - README.md
+  - LICENSE.txt
+labels:
+  - claude
+  - anthropic
+  - ai
+  - skills
+  - automation
+dependencies: []
