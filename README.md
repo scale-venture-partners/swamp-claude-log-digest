@@ -1,4 +1,4 @@
-# @wdm0006/claude-log-digest
+# @scale-venture-partners/claude-log-digest
 
 A [swamp](https://github.com/swamp-club/swamp) extension that reads your
 recent Claude Code session transcripts, summarizes what you worked on, and
@@ -24,7 +24,7 @@ request against a skills repo.
 ## Install
 
 ```bash
-swamp extension pull @wdm0006/claude-log-digest
+swamp extension pull @scale-venture-partners/claude-log-digest
 ```
 
 ## Configure
@@ -37,7 +37,7 @@ printf '%s' "$ANTHROPIC_API_KEY" | swamp vault put secrets ANTHROPIC_API_KEY
 ```
 
 Create a model instance and set its global arguments
-(`swamp model create @wdm0006/claude-log-digest claude-log-digest`, then
+(`swamp model create @scale-venture-partners/claude-log-digest claude-log-digest`, then
 `swamp model edit claude-log-digest`):
 
 | Arg | Required | Default | Notes |

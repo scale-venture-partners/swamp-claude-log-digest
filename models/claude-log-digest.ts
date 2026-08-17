@@ -364,7 +364,7 @@ async function run(
 
 /** Swamp model: summarize recent Claude Code work and distill reusable skills. */
 export const model = {
-  type: "@wdm0006/claude-log-digest",
+  type: "@scale-venture-partners/claude-log-digest",
   version: "2026.08.17.1",
   globalArguments: GlobalArgsSchema,
   resources: {

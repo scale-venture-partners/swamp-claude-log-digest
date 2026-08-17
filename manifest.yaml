@@ -1,5 +1,5 @@
 manifestVersion: 1
-name: '@wdm0006/claude-log-digest'
+name: '@scale-venture-partners/claude-log-digest'
 version: 2026.08.17.1
 description: >-
   Summarize recent Claude Code session transcripts and distill reusable agent
