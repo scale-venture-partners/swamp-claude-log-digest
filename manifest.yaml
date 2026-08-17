@@ -4,7 +4,7 @@ version: 2026.08.17.1
 description: >-
   Summarize recent Claude Code session transcripts and distill reusable agent
   skills, proposed as a pull request against a skills repository.
-repository: 'https://github.com/wdm0006/swamp-claude-log-digest'
+repository: 'https://github.com/scale-venture-partners/swamp-claude-log-digest'
 models:
   - claude-log-digest.ts
 workflows: []
