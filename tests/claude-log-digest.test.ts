@@ -846,7 +846,7 @@ Deno.test("publish", async (t) => {
           skillsOutDir,
           targetRepoPath: workDir,
           targetRepoSlug: "example/skills",
-          skillsRepoPath: "plugins/svp-sdlc/skills",
+          skillsRepoPath: "plugins/my-plugin/skills",
           branchPrefix: "test-digest",
         });
         const { context, written } = makeContext({ globalArgs: args });
@@ -871,7 +871,7 @@ Deno.test("publish", async (t) => {
             "git",
             `--git-dir=${originDir}`,
             "show",
-            `${branch}:plugins/svp-sdlc/skills/my-skill/SKILL.md`,
+            `${branch}:plugins/my-plugin/skills/my-skill/SKILL.md`,
           ],
           tmp,
         );
