@@ -17,7 +17,9 @@ request against a skills repo.
    - 2-5 proposed skills, each written as a `SKILL.md` draft into
      `skillsOutDir`. Existing skills in `skillsDir` are passed in, and a
      candidate is dropped if its name collides with one of them or if Claude
-     marks it as overlapping an existing skill's scope.
+     marks it as overlapping an existing skill's scope. Dropped candidates
+     are listed in the digest (and so in the PR body) under "Considered but
+     not proposed", with the reason, so reviewers see what was rejected.
 3. **`publish`** — opens a PR against `targetRepoPath`/`targetRepoSlug` with
    the staged skills, via a throwaway git worktree (your working checkout is
    never touched, and it's removed when the run finishes).
@@ -98,8 +100,57 @@ swamp model method run claude-log-digest publish
 skills produce no diff against `baseBranch`. Skip step 6 (and
 `targetRepoPath`/`targetRepoSlug`) if you just want the digest, not a PR.
 
-To automate the full pipeline, wire `gather -> analyze -> publish` into a
-swamp workflow.
+## Workflow
+
+To run the whole pipeline as one unit (and optionally on a schedule), wire the
+three methods into a swamp workflow. Scaffold one, then replace its `steps:`
+block:
+
+```bash
+swamp workflow create claude-log-digest --json   # writes workflows/workflow-<id>.yaml
+```
+
+```yaml
+jobs:
+  - name: digest
+    description: gather -> analyze -> publish
+    steps:
+      - name: gather
+        task:
+          type: model_method
+          modelIdOrName: claude-log-digest
+          methodName: gather
+        dependsOn: []
+      - name: analyze
+        task:
+          type: model_method
+          modelIdOrName: claude-log-digest
+          methodName: analyze
+        dependsOn:
+          - step: gather
+            condition: { type: succeeded }
+      - name: publish
+        task:
+          type: model_method
+          modelIdOrName: claude-log-digest
+          methodName: publish
+        dependsOn:
+          - step: analyze
+            condition: { type: succeeded }
+```
+
+```bash
+swamp workflow validate claude-log-digest
+swamp workflow run claude-log-digest
+```
+
+For a weekly run, add a cron trigger at the top level of the workflow file
+(`publish` needs `git` and `gh` on the scheduler's `PATH`):
+
+```yaml
+trigger:
+  schedule: "0 9 * * 1"
+```
 
 ## Plugin-based skills repos
 

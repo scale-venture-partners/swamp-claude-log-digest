@@ -136,6 +136,11 @@ const DigestSchema = z.object({
     description: z.string(),
     path: z.string(),
   })),
+  droppedCandidates: z.array(z.object({
+    name: z.string(),
+    description: z.string(),
+    reason: z.string(),
+  })),
 });
 
 const SkillResourceSchema = z.object({
@@ -367,27 +372,43 @@ export function filterCandidates(
   maxSkills: number,
 ): {
   kept: Array<Record<string, unknown>>;
-  dropped: Array<{ name: string; reason: string }>;
+  dropped: DroppedCandidate[];
 } {
   const existingSlugs = new Set(existing.map((s) => slugify(s.name)));
   const kept: Array<Record<string, unknown>> = [];
-  const dropped: Array<{ name: string; reason: string }> = [];
+  const dropped: DroppedCandidate[] = [];
   for (const c of candidates) {
     const name = String(c.name);
+    const description = String(c.description ?? "").trim();
     const overlapsRaw = typeof c.overlaps === "string" ? c.overlaps.trim() : "";
     const overlaps = /^(none|null|n\/a|-)$/i.test(overlapsRaw)
       ? ""
       : overlapsRaw;
     if (existingSlugs.has(slugify(name))) {
-      dropped.push({ name, reason: "name collides with an existing skill" });
+      dropped.push({
+        name,
+        description,
+        reason: "name collides with an existing skill",
+      });
     } else if (overlaps) {
-      dropped.push({ name, reason: `overlaps existing skill "${overlaps}"` });
+      dropped.push({
+        name,
+        description,
+        reason: `overlaps existing skill "${overlaps}"`,
+      });
     } else {
       kept.push(c);
     }
   }
   return { kept: kept.slice(0, maxSkills), dropped };
 }
+
+/** A distill candidate that was rejected, with the reason shown to reviewers. */
+export type DroppedCandidate = {
+  name: string;
+  description: string;
+  reason: string;
+};
 
 /** Whether a path exists (file or directory). */
 export async function fileExists(path: string): Promise<boolean> {
@@ -464,7 +485,7 @@ export async function run(
 /** Swamp model: summarize recent Claude Code work and distill reusable skills. */
 export const model = {
   type: "@scale-venture-partners/claude-log-digest",
-  version: "2026.09.11.1",
+  version: "2026.09.11.2",
   globalArguments: GlobalArgsSchema,
   resources: {
     manifest: {
@@ -764,7 +785,13 @@ export const model = {
                 proposedMeta.map((p) =>
                   `- **${p.name}** — ${p.description}\n  - _why:_ ${p.rationale}`
                 ).join("\n") + "\n"
-              : "## Proposed skills\n\n_None this run._\n");
+              : "## Proposed skills\n\n_None this run._\n") +
+            (dropped.length
+              ? `\n## Considered but not proposed\n\n` +
+                dropped.map((d) =>
+                  `- **${d.name}** — ${d.description}\n  - _dropped:_ ${d.reason}`
+                ).join("\n") + "\n"
+              : "");
           await Deno.mkdir(g.digestOut.replace(/\/[^/]*$/, ""), {
             recursive: true,
           })
@@ -787,6 +814,7 @@ export const model = {
               description: p.description,
               path: p.path,
             })),
+            droppedCandidates: dropped,
           }),
         );
 

@@ -320,6 +320,7 @@ Deno.test("filterCandidates", async (t) => {
     assertEquals(kept, []);
     assertEquals(dropped.length, 1);
     assertStringIncludes(dropped[0].reason, "collides");
+    assertEquals(dropped[0].description, "d");
   });
 
   await t.step("drops a candidate the model marked as overlapping", () => {
@@ -906,9 +907,10 @@ Deno.test("analyze", async (t) => {
         json: responses[call++],
       }));
 
+      const digestOut = `${await Deno.makeTempDir()}/digest.md`;
       try {
         const { context, written } = makeContext({
-          globalArgs: makeArgs({ skillsOutDir, skillsDir }),
+          globalArgs: makeArgs({ skillsOutDir, skillsDir, digestOut }),
           resources: {
             manifest: {
               generatedAt: new Date(0).toISOString(),
@@ -943,6 +945,25 @@ Deno.test("analyze", async (t) => {
         // deno-lint-ignore no-explicit-any
         const proposed = digestWrite!.data.proposedSkills as any[];
         assertEquals(proposed.map((p) => p.name), ["fresh-skill"]);
+
+        // deno-lint-ignore no-explicit-any
+        const droppedOut = digestWrite!.data.droppedCandidates as any[];
+        assertEquals(droppedOut.map((d) => d.name), [
+          "ci-perf",
+          "docker-caching",
+        ]);
+        assertStringIncludes(droppedOut[0].reason, "collides");
+        assertStringIncludes(
+          droppedOut[1].reason,
+          'overlaps existing skill "ci-perf"',
+        );
+        const digestFile = await Deno.readTextFile(digestOut);
+        assertStringIncludes(digestFile, "## Considered but not proposed");
+        assertStringIncludes(digestFile, "**docker-caching** — narrower");
+        assertStringIncludes(
+          digestFile,
+          '_dropped:_ overlaps existing skill "ci-perf"',
+        );
       } finally {
         restore();
         await Deno.remove(skillsOutDir, { recursive: true }).catch(() => {});

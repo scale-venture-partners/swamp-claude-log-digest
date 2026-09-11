@@ -1,6 +1,6 @@
 manifestVersion: 1
 name: '@scale-venture-partners/claude-log-digest'
-version: 2026.09.11.1
+version: 2026.09.11.2
 description: >-
   Summarize recent Claude Code session transcripts and distill reusable agent
   skills, proposed as a pull request against a skills repository.
