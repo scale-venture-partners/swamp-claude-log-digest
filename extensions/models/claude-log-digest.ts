@@ -36,6 +36,16 @@ export const GlobalArgsSchema = z.object({
   projectsDir: z.string().default("").describe(
     "Claude projects dir; defaults to $HOME/.claude/projects",
   ),
+  includeProjects: z.string().default("").describe(
+    "Comma-separated glob patterns (`*` matches anything). When set, only " +
+      "projects whose directory name or label matches one of them are " +
+      "gathered, e.g. '*-Documents-GitHub-*'. Empty means every project.",
+  ),
+  excludeProjects: z.string().default("").describe(
+    "Comma-separated glob patterns (`*` matches anything). Projects whose " +
+      "directory name or label matches one of them are skipped, e.g. " +
+      "'-Users-me,*scratch*'. Applied after includeProjects.",
+  ),
   skillsDir: z.string().default("").describe(
     "Existing skills dir, scanned to avoid proposing duplicates",
   ),
@@ -183,6 +193,24 @@ export function labelFor(slug: string): string {
   return slug.replace(/^-/, "").replace(/-/g, "/");
 }
 
+/** Split a comma-separated pattern list, dropping blanks. */
+export function parsePatterns(csv: string): string[] {
+  return csv.split(",").map((p) => p.trim()).filter(Boolean);
+}
+
+/** Whether any glob pattern (`*` = any run of characters) matches any value. */
+export function matchesAny(patterns: string[], values: string[]): boolean {
+  return patterns.some((pattern) => {
+    const re = new RegExp(
+      "^" +
+        pattern.split("*").map((s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+          .join(".*") +
+        "$",
+    );
+    return values.some((v) => re.test(v));
+  });
+}
+
 /** Condense one project's recent transcripts into a single capped string. */
 export async function condenseProject(
   dir: string,
@@ -328,6 +356,39 @@ export function slugify(name: string): string {
     .slice(0, 64) || "skill";
 }
 
+/**
+ * Drop distill candidates that duplicate an existing skill, then cap the rest.
+ * A slug collision must never reach `publish`: it copies staged directories
+ * over the target repo's, so a re-proposed name would overwrite that skill.
+ */
+export function filterCandidates(
+  candidates: Array<Record<string, unknown>>,
+  existing: Array<{ name: string }>,
+  maxSkills: number,
+): {
+  kept: Array<Record<string, unknown>>;
+  dropped: Array<{ name: string; reason: string }>;
+} {
+  const existingSlugs = new Set(existing.map((s) => slugify(s.name)));
+  const kept: Array<Record<string, unknown>> = [];
+  const dropped: Array<{ name: string; reason: string }> = [];
+  for (const c of candidates) {
+    const name = String(c.name);
+    const overlapsRaw = typeof c.overlaps === "string" ? c.overlaps.trim() : "";
+    const overlaps = /^(none|null|n\/a|-)$/i.test(overlapsRaw)
+      ? ""
+      : overlapsRaw;
+    if (existingSlugs.has(slugify(name))) {
+      dropped.push({ name, reason: "name collides with an existing skill" });
+    } else if (overlaps) {
+      dropped.push({ name, reason: `overlaps existing skill "${overlaps}"` });
+    } else {
+      kept.push(c);
+    }
+  }
+  return { kept: kept.slice(0, maxSkills), dropped };
+}
+
 /** Whether a path exists (file or directory). */
 export async function fileExists(path: string): Promise<boolean> {
   try {
@@ -403,7 +464,7 @@ export async function run(
 /** Swamp model: summarize recent Claude Code work and distill reusable skills. */
 export const model = {
   type: "@scale-venture-partners/claude-log-digest",
-  version: "2026.08.17.1",
+  version: "2026.09.11.1",
   globalArguments: GlobalArgsSchema,
   resources: {
     manifest: {
@@ -459,10 +520,22 @@ export const model = {
         const home = Deno.env.get("HOME") ?? "";
         const projectsDir = g.projectsDir || `${home}/.claude/projects`;
         const cutoffMs = Date.now() - g.days * 24 * 60 * 60 * 1000;
+        const include = parsePatterns(g.includeProjects);
+        const exclude = parsePatterns(g.excludeProjects);
 
         const projects: Array<z.infer<typeof ProjectSchema>> = [];
+        let filtered = 0;
         for await (const entry of Deno.readDir(projectsDir)) {
           if (!entry.isDirectory) continue;
+          const label = labelFor(entry.name);
+          const keys = [entry.name, label];
+          if (
+            (include.length > 0 && !matchesAny(include, keys)) ||
+            matchesAny(exclude, keys)
+          ) {
+            filtered++;
+            continue;
+          }
           const dir = `${projectsDir}/${entry.name}`;
           const { sessions, chars, content } = await condenseProject(
             dir,
@@ -471,22 +544,18 @@ export const model = {
             context.signal,
           );
           if (sessions === 0 || chars === 0) continue;
-          projects.push({
-            name: entry.name,
-            label: labelFor(entry.name),
-            sessions,
-            chars,
-            content,
-          });
+          projects.push({ name: entry.name, label, sessions, chars, content });
         }
         // Most active first; cap count.
         projects.sort((a, b) => b.chars - a.chars);
         const capped = projects.slice(0, g.maxProjects);
         context.logger.info(
-          "Condensed {n} active projects ({total} total chars)",
+          "Condensed {n} active projects ({total} total chars); " +
+            "{filtered} skipped by include/exclude patterns",
           {
             n: capped.length,
             total: capped.reduce((s, p) => s + p.chars, 0),
+            filtered,
           },
         );
 
@@ -576,11 +645,8 @@ export const model = {
           context.signal,
         )).trim();
 
-        // ---- DISTILL: propose reusable skills, in two stages ----
-        // Stage 1 decides WHICH skills as a small JSON array (name/description/
-        // rationale only). Stage 2 writes each SKILL.md body as plain markdown.
-        // Splitting avoids embedding long markdown inside JSON, which silently
-        // corrupts parsing.
+        // ---- DISTILL: a JSON call picks WHICH skills, then one plain-markdown
+        // call per skill writes its body. Markdown embedded in JSON corrupts parsing.
         const existing = await readExistingSkills(g.skillsDir);
         const existingList = existing.length
           ? existing.map((s) => `- ${s.name}: ${s.description}`).join("\n")
@@ -589,29 +655,45 @@ export const model = {
           g,
           `Across the last ${manifest.days} days, here is the work done:\n\n` +
             `${combined}\n\n` +
-            `These reusable agent "skills" ALREADY EXIST — do NOT duplicate ` +
-            `them:\n${existingList}\n\n` +
+            `These reusable agent "skills" ALREADY EXIST:\n${existingList}\n\n` +
             `Propose 2-${g.maxSkills} NEW reusable skills distilled from ` +
             `recurring or generalizable procedures in the work above — the kind ` +
-            `that would save time in future sessions. Skip a candidate only if ` +
-            `it clearly duplicates an existing skill or is too one-off to reuse.\n\n` +
+            `that would save time in future sessions. Skip a candidate if it is ` +
+            `too one-off to reuse. Compare every candidate against the existing ` +
+            `skills by SCOPE, not name: if an existing skill already covers the ` +
+            `same procedure, or the candidate is a narrower special case of one, ` +
+            `put that existing skill's name in "overlaps" instead of leaving it ` +
+            `empty.\n\n` +
             `Return ONLY a compact JSON array (no prose, no markdown bodies). ` +
             `Each element exactly:\n` +
             `{"name": "kebab-case-name", "description": "one sentence: what it ` +
-            `does and when to use it", "rationale": "why it is worth a skill"}`,
+            `does and when to use it", "rationale": "why it is worth a skill", ` +
+            `"overlaps": "name of the existing skill it duplicates, or \\"\\""}`,
           "You distill reusable agent skills. Output only a compact JSON array " +
-            "of {name, description, rationale} — no skill bodies, no prose.",
+            "of {name, description, rationale, overlaps} — no skill bodies, " +
+            "no prose.",
           context.signal,
         );
-        const candidates = parseJsonArray(distillRaw)
+        const parsedCandidates = parseJsonArray(distillRaw)
           .map((x) => x as Record<string, unknown>)
           .filter((x) =>
             x && typeof x.name === "string" && typeof x.description === "string"
-          )
-          .slice(0, g.maxSkills);
+          );
+        const { kept: candidates, dropped } = filterCandidates(
+          parsedCandidates,
+          existing,
+          g.maxSkills,
+        );
+        for (const d of dropped) {
+          context.logger.info("Dropped candidate {name}: {reason}", d);
+        }
         context.logger.info(
-          "Distill returned {raw} chars, parsed {n} skill candidates",
-          { raw: distillRaw.length, n: candidates.length },
+          "Distill returned {raw} chars, parsed {n} candidates, kept {kept}",
+          {
+            raw: distillRaw.length,
+            n: parsedCandidates.length,
+            kept: candidates.length,
+          },
         );
 
         const proposed: Array<Record<string, unknown>> = [];

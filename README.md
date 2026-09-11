@@ -15,8 +15,9 @@ request against a skills repo.
    - one summary per project,
    - an overall digest (a status-update-style writeup),
    - 2-5 proposed skills, each written as a `SKILL.md` draft into
-     `skillsOutDir` (existing skills in `skillsDir` are passed in so it
-     won't propose duplicates).
+     `skillsOutDir`. Existing skills in `skillsDir` are passed in, and a
+     candidate is dropped if its name collides with one of them or if Claude
+     marks it as overlapping an existing skill's scope.
 3. **`publish`** — opens a PR against `targetRepoPath`/`targetRepoSlug` with
    the staged skills, via a throwaway git worktree (your working checkout is
    never touched, and it's removed when the run finishes).
@@ -46,6 +47,8 @@ Create a model instance and set its global arguments
 | `model` | no | `claude-sonnet-5` | pin to whatever's current — model IDs retire over time |
 | `maxTokens` | no | `4096` | headroom for summaries and skill bodies |
 | `days` | no | `7` | lookback window for transcripts |
+| `includeProjects` | no | `""` | comma-separated globs (`*` wildcard); when set, only projects whose dir name or label matches are gathered |
+| `excludeProjects` | no | `""` | comma-separated globs; matching projects are skipped (e.g. `-Users-me` to drop sessions run from your home dir) |
 | `skillsDir` | no | `""` | existing skills dir, scanned to avoid duplicate proposals |
 | `skillsOutDir` | no | `""` | staging dir for proposed `SKILL.md` files (cleared each `analyze` run); `publish` reads from here |
 | `digestOut` | no | `""` | markdown file path; used as the PR body by `publish` if present |
@@ -156,6 +159,29 @@ The pre-commit hook runs `deno task verify` before every commit. Tests use a
 real temporary git repository for `publish` (real `git`, a faked `gh`
 executable on a throwaway `PATH` entry) and a stubbed `fetch` for Claude API
 calls — no network access or real GitHub PRs are involved.
+
+### Trying it from a local checkout
+
+Load the extension into any swamp repo straight from this checkout, no publish
+needed — edits here are picked up on the next method run:
+
+```bash
+swamp extension source add /path/to/swamp-claude-log-digest
+swamp model type describe @scale-venture-partners/claude-log-digest
+```
+
+### Publishing
+
+The model lives under `extensions/models/` and the repo carries a `.swamp.yaml`
+marker, which is the layout `swamp extension quality` and `swamp extension push`
+expect. Before pushing, bump `version` in `manifest.yaml` and confirm the
+rubric still passes:
+
+```bash
+swamp extension quality manifest.yaml   # local self-check, no network
+swamp auth login
+swamp extension push manifest.yaml
+```
 
 ## License
 
