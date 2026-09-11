@@ -3,7 +3,7 @@
     "@std/assert": "jsr:@std/assert@1"
   },
   "tasks": {
-    "check": "deno check models/claude-log-digest.ts tests/claude-log-digest.test.ts",
+    "check": "deno check extensions/models/claude-log-digest.ts tests/claude-log-digest.test.ts",
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
     "lint": "deno lint",
@@ -11,9 +11,9 @@
     "verify": "deno task check && deno task fmt:check && deno task lint && deno task test"
   },
   "fmt": {
-    "include": ["models/", "tests/"]
+    "include": ["extensions/models/", "tests/"]
   },
   "lint": {
-    "include": ["models/", "tests/"]
+    "include": ["extensions/models/", "tests/"]
   }
 }

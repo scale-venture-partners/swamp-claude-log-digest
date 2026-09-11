@@ -10,16 +10,19 @@ import {
   condenseProject,
   copyDirRecursive,
   fileExists,
+  filterCandidates,
   type GlobalArgs,
   GlobalArgsSchema,
   labelFor,
   lineText,
+  matchesAny,
   model,
   parseJsonArray,
+  parsePatterns,
   readExistingSkills,
   run,
   slugify,
-} from "../models/claude-log-digest.ts";
+} from "../extensions/models/claude-log-digest.ts";
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -150,6 +153,8 @@ Deno.test("GlobalArgsSchema fills in expected defaults", () => {
   assertEquals(args.model, "claude-sonnet-5");
   assertEquals(args.days, 7);
   assertEquals(args.maxTokens, 4096);
+  assertEquals(args.includeProjects, "");
+  assertEquals(args.excludeProjects, "");
   assertEquals(args.skillsRepoPath, "skills");
   assertEquals(args.baseBranch, "main");
   assertEquals(args.branchPrefix, "claude-digest/skills");
@@ -265,6 +270,98 @@ Deno.test("slugify", async (t) => {
   await t.step("falls back to 'skill' when nothing survives", () => {
     assertEquals(slugify("!!!"), "skill");
     assertEquals(slugify(""), "skill");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// parsePatterns / matchesAny
+// ---------------------------------------------------------------------------
+
+Deno.test("parsePatterns splits on commas and drops blanks", () => {
+  assertEquals(parsePatterns(""), []);
+  assertEquals(parsePatterns(" a , ,b,"), ["a", "b"]);
+});
+
+Deno.test("matchesAny", async (t) => {
+  await t.step("matches exactly when there is no wildcard", () => {
+    assert(matchesAny(["-Users-will"], ["-Users-will", "Users/will"]));
+    assert(!matchesAny(["-Users-will"], ["-Users-will-Documents-GitHub"]));
+  });
+
+  await t.step("treats * as any run of characters", () => {
+    assert(matchesAny(["*-GitHub-*"], ["-Users-will-Documents-GitHub-repo"]));
+    assert(matchesAny(["*scratch*"], ["my-scratch-pad"]));
+    assert(!matchesAny(["*scratch*"], ["real-work"]));
+  });
+
+  await t.step("escapes regex metacharacters in patterns", () => {
+    assert(matchesAny(["a.b"], ["a.b"]));
+    assert(!matchesAny(["a.b"], ["axb"]));
+  });
+
+  await t.step("is false for an empty pattern list", () => {
+    assert(!matchesAny([], ["anything"]));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// filterCandidates
+// ---------------------------------------------------------------------------
+
+Deno.test("filterCandidates", async (t) => {
+  const existing = [{ name: "ci-performance-optimization" }];
+
+  await t.step("drops a candidate whose slug matches an existing skill", () => {
+    const { kept, dropped } = filterCandidates(
+      [{ name: "CI Performance Optimization", description: "d" }],
+      existing,
+      5,
+    );
+    assertEquals(kept, []);
+    assertEquals(dropped.length, 1);
+    assertStringIncludes(dropped[0].reason, "collides");
+  });
+
+  await t.step("drops a candidate the model marked as overlapping", () => {
+    const { kept, dropped } = filterCandidates(
+      [{
+        name: "docker-layer-caching",
+        description: "d",
+        overlaps: "ci-performance-optimization",
+      }],
+      existing,
+      5,
+    );
+    assertEquals(kept, []);
+    assertStringIncludes(dropped[0].reason, "ci-performance-optimization");
+  });
+
+  await t.step("treats none/null/n-a placeholders as no overlap", () => {
+    for (const placeholder of ["", "none", "NULL", "n/a", "-"]) {
+      const { kept } = filterCandidates(
+        [{ name: "fresh", description: "d", overlaps: placeholder }],
+        existing,
+        5,
+      );
+      assertEquals(
+        kept.length,
+        1,
+        `placeholder ${JSON.stringify(placeholder)}`,
+      );
+    }
+  });
+
+  await t.step("caps after filtering so drops do not consume the quota", () => {
+    const { kept } = filterCandidates(
+      [
+        { name: "ci-performance-optimization", description: "d" },
+        { name: "a", description: "d" },
+        { name: "b", description: "d" },
+      ],
+      existing,
+      2,
+    );
+    assertEquals(kept.map((c) => c.name), ["a", "b"]);
   });
 });
 
@@ -596,6 +693,52 @@ Deno.test("gather", async (t) => {
       }
     },
   );
+
+  await t.step(
+    "applies includeProjects then excludeProjects by dir name or label",
+    async () => {
+      const projectsDir = await Deno.makeTempDir();
+      for (
+        const slug of [
+          "-Users-me-Documents-GitHub-work-repo",
+          "-Users-me-Documents-GitHub-scratch-pad",
+          "-Users-me",
+        ]
+      ) {
+        await Deno.mkdir(`${projectsDir}/${slug}`, { recursive: true });
+        await Deno.writeTextFile(
+          `${projectsDir}/${slug}/s.jsonl`,
+          userLine(`work in ${slug}`),
+        );
+      }
+      const names = async (args: GlobalArgs) => {
+        const { context, written } = makeContext({ globalArgs: args });
+        await model.methods.gather.execute({}, context);
+        // deno-lint-ignore no-explicit-any
+        return (written[0].data.projects as any[]).map((p) => p.name).sort();
+      };
+
+      // Exclude by exact dir name (the home-dir project).
+      assertEquals(
+        await names(makeArgs({ projectsDir, excludeProjects: "-Users-me" })),
+        [
+          "-Users-me-Documents-GitHub-scratch-pad",
+          "-Users-me-Documents-GitHub-work-repo",
+        ],
+      );
+      // Include by glob, then exclude by label.
+      assertEquals(
+        await names(makeArgs({
+          projectsDir,
+          includeProjects: "*-Documents-GitHub-*",
+          excludeProjects: "scratch-*",
+        })),
+        ["-Users-me-Documents-GitHub-work-repo"],
+      );
+
+      await Deno.remove(projectsDir, { recursive: true });
+    },
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -717,6 +860,89 @@ Deno.test("analyze", async (t) => {
         const digestFile = await Deno.readTextFile(digestOut);
         assertStringIncludes(digestFile, "## Claude work digest");
         assertStringIncludes(digestFile, "my-new-skill");
+      } finally {
+        restore();
+        await Deno.remove(skillsOutDir, { recursive: true }).catch(() => {});
+        await Deno.remove(skillsDir, { recursive: true }).catch(() => {});
+      }
+    },
+  );
+
+  await t.step(
+    "drops candidates that collide with or overlap existing skills",
+    async () => {
+      const skillsOutDir = await Deno.makeTempDir({ prefix: "skills-out-" });
+      const skillsDir = await Deno.makeTempDir({ prefix: "skills-dir-" });
+      await Deno.mkdir(`${skillsDir}/ci-perf`, { recursive: true });
+      await Deno.writeTextFile(
+        `${skillsDir}/ci-perf/SKILL.md`,
+        '---\nname: ci-perf\ndescription: "speed up CI"\n---\n\nbody',
+      );
+
+      const distill = [
+        { name: "ci-perf", description: "same name", rationale: "r" },
+        {
+          name: "docker-caching",
+          description: "narrower",
+          rationale: "r",
+          overlaps: "ci-perf",
+        },
+        {
+          name: "fresh-skill",
+          description: "new",
+          rationale: "r",
+          overlaps: "",
+        },
+      ];
+      const responses = [
+        { content: [{ type: "text", text: "- did work" }] },
+        { content: [{ type: "text", text: "update" }] },
+        { content: [{ type: "text", text: JSON.stringify(distill) }] },
+        { content: [{ type: "text", text: "# fresh-skill\nSteps." }] },
+      ];
+      let call = 0;
+      const { calls, restore } = stubFetch(() => ({
+        status: 200,
+        json: responses[call++],
+      }));
+
+      try {
+        const { context, written } = makeContext({
+          globalArgs: makeArgs({ skillsOutDir, skillsDir }),
+          resources: {
+            manifest: {
+              generatedAt: new Date(0).toISOString(),
+              days: 7,
+              projectCount: 1,
+              projects: [{
+                name: "-proj",
+                label: "proj",
+                sessions: 1,
+                chars: 10,
+                content: "USER: do the thing",
+              }],
+            },
+          },
+        });
+
+        await model.methods.analyze.execute({}, context);
+
+        // Only the surviving candidate gets a body call.
+        assertEquals(call, 4);
+        const distillPrompt = String(
+          // deno-lint-ignore no-explicit-any
+          (calls[2].messages as any[])[0].content,
+        );
+        assertStringIncludes(distillPrompt, "- ci-perf: speed up CI");
+        assertStringIncludes(distillPrompt, '"overlaps"');
+
+        const staged = (await Array.fromAsync(Deno.readDir(skillsOutDir)))
+          .map((e) => e.name);
+        assertEquals(staged, ["fresh-skill"]);
+        const digestWrite = written.find((w) => w.spec === "digest");
+        // deno-lint-ignore no-explicit-any
+        const proposed = digestWrite!.data.proposedSkills as any[];
+        assertEquals(proposed.map((p) => p.name), ["fresh-skill"]);
       } finally {
         restore();
         await Deno.remove(skillsOutDir, { recursive: true }).catch(() => {});
