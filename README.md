@@ -1,5 +1,8 @@
 # @scale-venture-partners/claude-log-digest
 
+[![swamp extension](https://img.shields.io/badge/swamp-extension-00C756.svg)](https://github.com/swamp-club/swamp)
+[![License: MIT](https://img.shields.io/badge/License-MIT-00C756.svg)](LICENSE.txt)
+
 A [swamp](https://github.com/swamp-club/swamp) extension that reads your
 recent Claude Code session transcripts, summarizes what you worked on, and
 distills reusable agent skills from the work — optionally opened as a pull
@@ -236,4 +239,4 @@ swamp extension push manifest.yaml
 
 ## License
 
-MIT — see [LICENSE.txt](LICENSE.txt).
+[MIT](LICENSE.txt) © Scale Venture Partners.
