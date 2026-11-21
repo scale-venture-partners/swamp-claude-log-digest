@@ -11,9 +11,9 @@ request against a skills repo.
 ## What it does
 
 1. **`gather`** — reads `*.jsonl` transcripts under `~/.claude/projects/`
-   from the last N days and condenses each project to its user/assistant
-   turns, capped per project. No LLM calls; cheap to run and inspect before
-   paying for `analyze`.
+   (or `projectsDir`) from the last N days and condenses each project to its
+   user/assistant turns, capped per project. No LLM calls; cheap to run and
+   inspect before paying for `analyze`.
 2. **`analyze`** — map-reduces the manifest with Claude:
    - one summary per project,
    - an overall digest (a status-update-style writeup),
@@ -52,6 +52,7 @@ Create a model instance and set its global arguments
 | `model` | no | `claude-sonnet-5` | pin to whatever's current — model IDs retire over time |
 | `maxTokens` | no | `4096` | headroom for summaries and skill bodies |
 | `days` | no | `7` | lookback window for transcripts |
+| `projectsDir` | no | `""` | where to read transcripts from; empty means `$HOME/.claude/projects` |
 | `includeProjects` | no | `""` | comma-separated globs (`*` wildcard); when set, only projects whose dir name or label matches are gathered |
 | `excludeProjects` | no | `""` | comma-separated globs; matching projects are skipped (e.g. `-Users-me` to drop sessions run from your home dir) |
 | `skillsDir` | no | `""` | existing skills dir, scanned to avoid duplicate proposals |
